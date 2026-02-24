@@ -211,7 +211,7 @@ class ParticleFilterNode(LifecycleNode):
         msg.pose.position.z = 0.0
 
         # calculate quaternions
-        qx, qy, qz, qw = euler2quat(0.0, 0.0, float(theta_h))
+        qw, qx, qy, qz = euler2quat(0.0, 0.0, float(theta_h))
         msg.pose.orientation.x = qx
         msg.pose.orientation.y = qy
         msg.pose.orientation.z = qz

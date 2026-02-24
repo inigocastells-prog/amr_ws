@@ -73,7 +73,7 @@ class ParticleFilter:
         MIN_PARTICLES = 100
         MAX_PARTICLES = self._initial_particle_count
 
-        TRACKING_PARTICLES = 100          # partículas cuando ya está localizado (modo “GPS”)
+        TRACKING_PARTICLES = 10          # partículas cuando ya está localizado (modo “GPS”)
         PARTICLES_PER_CLUSTER = 100       # heurística cuando hay varios clusters
 
         localized: bool = False
@@ -87,14 +87,37 @@ class ParticleFilter:
         xy = np.array(self._particles[:, 0:2], dtype=float)
         labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES).fit_predict(xy)
 
-        # Clusters válidos (ignoramos ruido = -1)
-        cluster_ids = [c for c in set(labels.tolist()) if c != -1]
-        num_clusters = len(cluster_ids)
+        n_total = len(labels)
+        n_noise = int(np.sum(labels == -1))
+        noise_ratio = n_noise / max(1, n_total)
+
+        valid_ids = [c for c in set(labels.tolist()) if c != -1]
+        num_clusters = len(valid_ids)
+        if len(valid_ids) > 0:
+            counts = {c: int(np.sum(labels == c)) for c in valid_ids}
+            main_cid = max(counts, key=counts.get)
+            main_ratio = counts[main_cid] / n_total
+        else:
+            main_cid = None
+            main_ratio = 0.0
+
 
         # Decide si está localizado y cuántas partículas mantener
-        if num_clusters == 1:
-            localized = True
-            target_count = TRACKING_PARTICLES
+        THETA_R_MIN = 0.7         # concentración mínima de theta
+        MAIN_RATIO_MIN = 0.6      # cluster principal debe tener al menos 60%
+        NOISE_RATIO_MAX = 0.3     # como máximo 30% ruido
+
+        if len(valid_ids) == 1 and main_ratio >= MAIN_RATIO_MIN and noise_ratio <= NOISE_RATIO_MAX:
+            # mira también si theta es coherente dentro del cluster principal
+            pts = self._particles[labels == main_cid]
+            th = pts[:, 2].astype(float)
+            s = float(np.mean(np.sin(th)))
+            c = float(np.mean(np.cos(th)))
+            R = math.sqrt(s*s + c*c)
+
+            localized = (R >= THETA_R_MIN)
+
+            target_count = TRACKING_PARTICLES if localized else MAX_PARTICLES
         else:
             localized = False
             if num_clusters == 0:

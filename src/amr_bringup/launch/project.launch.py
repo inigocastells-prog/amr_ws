@@ -8,7 +8,7 @@ def generate_launch_description():
     world = "project"
     start = (2.0, -3.0, 1.5 * math.pi)
     goal = (3.0, 2.0)
-    particles = 10000
+    particles = 8500
 
     wall_follower_node = LifecycleNode(
         package="amr_control",

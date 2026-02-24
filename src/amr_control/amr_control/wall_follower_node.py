@@ -46,16 +46,18 @@ class WallFollowerNode(LifecycleNode):
             self._subscribers.append(message_filters.Subscriber(self, RangeScan, "/us_scan"))
 
             # 3) syncrinize the messages
-            self._ts = message_filters.ApproximateTimeSynchronizer(
-            self._subscribers, queue_size=10, slop=0.1
-            )
-            self._ts.registerCallback(self._compute_commands_callback)
+           
 
             # TODO: 4.5. Add /pose to the synced subscriptions only if localization is enabled.
             if self._enable_localization:
                 self._subscribers.append(
                     message_filters.Subscriber(self, PoseStamped, "/pose")
                 )
+
+            self._ts = message_filters.ApproximateTimeSynchronizer(
+            self._subscribers, queue_size=10, slop=9
+            )
+            self._ts.registerCallback(self._compute_commands_callback)
 
             # Publishers
             # TODO: 1.10. Create the /cmd_vel velocity commands publisher (TwistStamped message).
