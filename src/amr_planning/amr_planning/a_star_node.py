@@ -85,26 +85,25 @@ class AStarNode(LifecycleNode):
             # Execute A*
             start = (pose_msg.pose.position.x, pose_msg.pose.position.y)
             path, steps = self._planning.a_star(start, self._goal)
-            smoothed_path = AStar.smooth_path(path, data_weight=0.3, smooth_weight=0.1)
+            smoothed_path = AStar.smooth_path(path, data_weight=0.2, smooth_weight=0.2)
 
             # --- Run naive search (heuristic = 0) ---
             original_compute_heuristic = self._planning._compute_heuristic
 
             # Override heuristic temporarily
-            self._planning._compute_heuristic = lambda goal: \
-                np.zeros_like(self._planning._map.grid_map)
+            self._planning._compute_heuristic = lambda goal: np.zeros_like(
+                self._planning._map.grid_map
+            )
 
             _, naive_steps = self._planning.a_star(start, self._goal)
 
             # Restore original heuristic
             self._planning._compute_heuristic = original_compute_heuristic
 
-
             self.get_logger().info(f"Path found in {steps} steps.")
             self.get_logger().info(f"Naive search (h=0) found path in {naive_steps} steps.")
             self._planning.show(path, smoothed_path, save_figure=True)
             self.get_logger().warn(f"Using action_costs = {self._planning._action_costs}")
-
 
             self._publish_path(smoothed_path)
 
@@ -124,7 +123,7 @@ class AStarNode(LifecycleNode):
 
         poses: list[PoseStamped] = []
 
-        for (x, y) in path:
+        for x, y in path:
             p = PoseStamped()
             p.header.stamp = msg.header.stamp
             p.header.frame_id = msg.header.frame_id
@@ -144,7 +143,6 @@ class AStarNode(LifecycleNode):
         msg.poses = poses
         self._path_pub.publish(msg)
 
-        
 
 def main(args=None):
     rclpy.init(args=args)

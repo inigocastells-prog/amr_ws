@@ -21,8 +21,8 @@ class ParticleFilterNode(LifecycleNode):
         # Parameters
         self.declare_parameter("dt", 0.05)
         self.declare_parameter("enable_plot", False)
-        self.declare_parameter("particles", 3000)
-        self.declare_parameter("steps_btw_sense_updates", 10)
+        self.declare_parameter("particles", 4000)
+        self.declare_parameter("steps_btw_sense_updates", 15)
         self.declare_parameter("world", "project")
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
@@ -203,8 +203,8 @@ class ParticleFilterNode(LifecycleNode):
             msg.pose.orientation.w = 1.0
             self.pose_pub.publish(msg)
             return
-        
-        # if localized 
+
+        # if localized
         # store pose
         msg.pose.position.x = float(x_h)
         msg.pose.position.y = float(y_h)
@@ -219,7 +219,7 @@ class ParticleFilterNode(LifecycleNode):
 
         # publish
         self.pose_pub.publish(msg)
-        
+
 
 def main(args=None):
     rclpy.init(args=args)

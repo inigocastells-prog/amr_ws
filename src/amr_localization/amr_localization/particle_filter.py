@@ -66,101 +66,83 @@ class ParticleFilter:
 
         """
         # TODO: 2.10. Complete the missing function body with your code.
-        # Hyperparameters (ajústalos si hace falta)
-        DBSCAN_EPS = 0.20          # [m] radio vecindad
-        DBSCAN_MIN_SAMPLES = 15    # mínimo para formar cluster
+        # Hyperparameters
+        DBSCAN_EPS = 0.20
+        DBSCAN_MIN_SAMPLES = 15
+        THETA_WEIGHT = 0.1  # peso de theta en DBSCAN (conservador)
 
         MIN_PARTICLES = 100
         MAX_PARTICLES = self._initial_particle_count
 
-        TRACKING_PARTICLES = 10          # partículas cuando ya está localizado (modo “GPS”)
-        PARTICLES_PER_CLUSTER = 100       # heurística cuando hay varios clusters
+        TRACKING_PARTICLES = 20  # minimo de particulas en modo tracking
+        REDUCTION_FACTOR = 0.75  # cada llamada se conserva este % de particulas
+        PARTICLES_PER_CLUSTER = 100
 
         localized: bool = False
         pose: tuple[float, float, float] = (float("inf"), float("inf"), float("inf"))
 
-        # Seguridad básica
+        # Seguridad basica
         if self._particles is None or len(self._particles) == 0:
             return False, pose
 
-        # DBSCAN sobre (x,y)
-        xy = np.array(self._particles[:, 0:2], dtype=float)
-        labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES).fit_predict(xy)
+        # DBSCAN sobre (x, y, cos(theta)*w, sin(theta)*w)
+        # Theta codificado como circular para evitar fusionar clusters opuestos
+        particles_xy = np.array(self._particles[:, 0:2], dtype=float)
+        particles_th = np.array(self._particles[:, 2], dtype=float)
+        features = np.column_stack(
+            [
+                particles_xy,
+                THETA_WEIGHT * np.cos(particles_th),
+                THETA_WEIGHT * np.sin(particles_th),
+            ]
+        )
+        labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES).fit_predict(features)
 
-        n_total = len(labels)
-        n_noise = int(np.sum(labels == -1))
-        noise_ratio = n_noise / max(1, n_total)
+        cluster_ids = [c for c in set(labels.tolist()) if c != -1]
+        num_clusters = len(cluster_ids)
 
-        valid_ids = [c for c in set(labels.tolist()) if c != -1]
-        num_clusters = len(valid_ids)
-        if len(valid_ids) > 0:
-            counts = {c: int(np.sum(labels == c)) for c in valid_ids}
-            main_cid = max(counts, key=counts.get)
-            main_ratio = counts[main_cid] / n_total
-        else:
-            main_cid = None
-            main_ratio = 0.0
-
-
-        # Decide si está localizado y cuántas partículas mantener
-        THETA_R_MIN = 0.7         # concentración mínima de theta
-        MAIN_RATIO_MIN = 0.6      # cluster principal debe tener al menos 60%
-        NOISE_RATIO_MAX = 0.3     # como máximo 30% ruido
-
-        if len(valid_ids) == 1 and main_ratio >= MAIN_RATIO_MIN and noise_ratio <= NOISE_RATIO_MAX:
-            # mira también si theta es coherente dentro del cluster principal
-            pts = self._particles[labels == main_cid]
-            th = pts[:, 2].astype(float)
-            s = float(np.mean(np.sin(th)))
-            c = float(np.mean(np.cos(th)))
-            R = math.sqrt(s*s + c*c)
-
-            localized = (R >= THETA_R_MIN)
-
-            target_count = TRACKING_PARTICLES if localized else MAX_PARTICLES
+        if num_clusters == 1:
+            localized = True
         else:
             localized = False
-            if num_clusters == 0:
-                target_count = MAX_PARTICLES
-            else:
-                target_count = PARTICLES_PER_CLUSTER * max(1, num_clusters)
 
-            target_count = max(MIN_PARTICLES, min(MAX_PARTICLES, target_count))
-
-        # Reducir/aumentar partículas por submuestreo uniforme (NO likelihood aquí)
-        n = int(self._particles.shape[0])
-        if target_count != n:
-            idx = np.random.choice(
-                np.arange(n),
-                size=int(target_count),
-                replace=(target_count > n),
-            )
-            self._particles = self._particles[idx].copy()
-
-            # Recalcular labels si hemos cambiado el set (importante)
-            xy = np.array(self._particles[:, 0:2], dtype=float)
-            labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES).fit_predict(xy)
-            cluster_ids = [c for c in set(labels.tolist()) if c != -1]
-            num_clusters = len(cluster_ids)
-
-            # Si tras reducir ya no queda un solo cluster, no damos pose
-            if localized and num_clusters != 1:
-                return False, pose
-
-        # Si localizado, estimamos pose desde el único cluster
         if localized:
-            # Asegura que hay exactamente un cluster no ruido
-            cluster_ids = [c for c in set(labels.tolist()) if c != -1]
-            if len(cluster_ids) != 1:
-                return False, pose
-
             cid = cluster_ids[0]
             mask = labels == cid
-            pts = self._particles[mask]
+            cluster_particles = self._particles[mask]
+            nc = cluster_particles.shape[0]
 
-            if pts.shape[0] == 0:
+            if nc == 0:
                 return False, pose
 
+            # --- Reduccion gradual ponderada por distancia al centroide ---
+            # Solo reducimos si estamos por encima de TRACKING_PARTICLES
+            if nc > TRACKING_PARTICLES:
+                # Centroide en (x, y)
+                cx = float(np.mean(cluster_particles[:, 0].astype(float)))
+                cy = float(np.mean(cluster_particles[:, 1].astype(float)))
+
+                # Distancia euclidea de cada particula al centroide
+                dists = np.sqrt(
+                    (cluster_particles[:, 0].astype(float) - cx) ** 2
+                    + (cluster_particles[:, 1].astype(float) - cy) ** 2
+                )
+
+                # Peso inversamente proporcional a la distancia (mas cerca = mas prob de sobrevivir)
+                # Sumamos epsilon para evitar division por cero
+                weights = 1.0 / (dists + 1e-6)
+                weights /= weights.sum()
+
+                # Reduccion gradual: target es REDUCTION_FACTOR * n_actual, minimo TRACKING_PARTICLES
+                target_count = max(TRACKING_PARTICLES, int(nc * REDUCTION_FACTOR))
+                idx = np.random.choice(nc, size=target_count, replace=False, p=weights)
+                self._particles = cluster_particles[idx].copy()
+            else:
+                # Ya tenemos pocas particulas, conservar todas las del cluster
+                self._particles = cluster_particles.copy()
+
+            # Calcular pose desde las particulas supervivientes
+            pts = self._particles
             xs = pts[:, 0].astype(float)
             ys = pts[:, 1].astype(float)
             th = pts[:, 2].astype(float)
@@ -168,12 +150,30 @@ class ParticleFilter:
             x_h = float(np.mean(xs))
             y_h = float(np.mean(ys))
 
-            # Media circular para theta (maneja 0 ~ 2π)
+            # Media circular para theta
             s = float(np.mean(np.sin(th)))
             c = float(np.mean(np.cos(th)))
             theta_h = float(math.atan2(s, c) % (2.0 * math.pi))
 
             pose = (x_h, y_h, theta_h)
+
+        else:
+            # No localizado: ajustar numero de particulas segun clusters
+            if num_clusters == 0:
+                target_count = MAX_PARTICLES
+            else:
+                target_count = PARTICLES_PER_CLUSTER * max(1, num_clusters)
+
+            target_count = max(MIN_PARTICLES, min(MAX_PARTICLES, target_count))
+            n = int(self._particles.shape[0])
+
+            if target_count != n:
+                idx = np.random.choice(
+                    np.arange(n),
+                    size=int(target_count),
+                    replace=(target_count > n),
+                )
+                self._particles = self._particles[idx].copy()
 
         return localized, pose
 
@@ -223,7 +223,7 @@ class ParticleFilter:
             self._particles[i, 0] = x1
             self._particles[i, 1] = y1
             self._particles[i, 2] = th1
-        
+
     def resample(self, measurements: list[float]) -> None:
         """Samples a new set of particles.
 
@@ -252,7 +252,7 @@ class ParticleFilter:
         idx = np.random.choice(np.arange(n), size=n, replace=True, p=weights)
 
         self._particles = self._particles[idx].copy()
-        
+
     def plot(self, axes, orientation: bool = True):
         """Draws particles.
 
@@ -343,7 +343,7 @@ class ParticleFilter:
         particles = np.empty((particle_count, 3), dtype=object)
 
         # TODO: 2.4. Complete the missing function body with your code.
-        
+
         thetas = np.array([0.0, np.pi / 2.0, np.pi, 3.0 * np.pi / 2.0], dtype=float)
 
         # bounds() -> (x_min, y_min, x_max, y_max)
@@ -415,7 +415,6 @@ class ParticleFilter:
                 z_hat.append(float(dist))
 
         return z_hat
-        
 
     @staticmethod
     def _gaussian(mu: float, sigma: float, x: float) -> float:
@@ -437,7 +436,7 @@ class ParticleFilter:
         coeff = 1.0 / (math.sqrt(2.0 * math.pi) * sigma)
         exp = -0.5 * ((x - mu) / sigma) ** 2
         return coeff * math.exp(exp)
-        
+
     def _measurement_probability(
         self, measurements: list[float], particle: tuple[float, float, float]
     ) -> float:
@@ -459,7 +458,7 @@ class ParticleFilter:
         probability = 1.0
 
         # TODO: 2.8. Complete the missing function body with your code.
-        
+
         z_hat = self._sense(particle)
 
         # Factor para reemplazar lecturas inf (cámbialo si quieres)
@@ -504,5 +503,5 @@ class ParticleFilter:
             x_end = xs + self._sensor_range * math.cos(theta + ts)
             y_end = ys + self._sensor_range * math.sin(theta + ts)
             rays.append([(xs, ys), (x_end, y_end)])
-        
+
         return rays

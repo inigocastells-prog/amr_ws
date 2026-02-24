@@ -1,5 +1,6 @@
 import math
 
+
 class PurePursuit:
     """Class to follow a path using a simple pure pursuit controller."""
 
@@ -31,7 +32,7 @@ class PurePursuit:
         # TODO: 4.4. Complete the function body with your code (i.e., compute v and w).
         v = 0.0
         w = 0.0
-        
+
         # 0) Si no hay path todavía, no hacemos nada
         if not self._path:
             return 0.0, 0.0
@@ -71,7 +72,7 @@ class PurePursuit:
 
         # 6) Elegimos una v (constante) y calculamos w = v * kappa
         # (Luego se satura para evitar valores absurdos)
-        v = 0.25  # m/s (puedes tunear)
+        v = 0.7  # m/s
         w = v * kappa
 
         # Saturaciones razonables
@@ -83,7 +84,7 @@ class PurePursuit:
 
         # Opcional: bajar v en curvas fuertes
         if abs(w) > 0.8:
-            v = 0.15
+            v = 0.3
 
         return v, w
 
@@ -136,7 +137,7 @@ class PurePursuit:
                 closest_xy = (px, py)
 
         return closest_xy, closest_idx
-        
+
     def _find_target_point(
         self, origin_xy: tuple[float, float], origin_idx: int
     ) -> tuple[float, float]:
@@ -202,4 +203,3 @@ class PurePursuit:
         target_xy = self._path[-1]
 
         return target_xy
-        
