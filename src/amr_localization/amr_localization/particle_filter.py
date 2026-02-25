@@ -224,7 +224,7 @@ class ParticleFilter:
             self._particles[i, 1] = y1
             self._particles[i, 2] = th1
 
-    def resample(self, measurements: list[float]) -> None:
+    def resample(self, measurements: list[float]) -> None:  # cambiar a remuestreo sistemático para proteger mala suerte con numeros aleatorios https://www.tuananhle.co.uk/notes/resampling.html
         """Samples a new set of particles.
 
         Args:
@@ -249,7 +249,19 @@ class ParticleFilter:
         else:
             weights /= w_sum
 
-        idx = np.random.choice(np.arange(n), size=n, replace=True, p=weights)
+        # Remuestreo sistemático
+        positions = (np.arange(n) + np.random.uniform()) / n
+        cumulative_sum = np.cumsum(weights)
+
+        idx = np.zeros(n, dtype=int)
+        i, j = 0, 0
+
+        while i < n:
+            if positions[i] < cumulative_sum[j]:
+                idx[i] = j
+                i += 1
+            else:
+                j += 1
 
         self._particles = self._particles[idx].copy()
 
