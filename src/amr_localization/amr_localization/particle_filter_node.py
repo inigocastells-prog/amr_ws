@@ -22,7 +22,7 @@ class ParticleFilterNode(LifecycleNode):
         self.declare_parameter("dt", 0.05)
         self.declare_parameter("enable_plot", False)
         self.declare_parameter("particles", 4000)
-        self.declare_parameter("steps_btw_sense_updates", 15)
+        self.declare_parameter("steps_btw_sense_updates", 20)
         self.declare_parameter("world", "project")
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:

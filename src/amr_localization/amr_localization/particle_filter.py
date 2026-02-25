@@ -19,9 +19,9 @@ class ParticleFilter:
         sensors: list[tuple[float, float, float]],
         sensor_range: float,
         particle_count: int,
-        sigma_v: float = 0.15,
+        sigma_v: float = 0.2,
         sigma_w: float = 0.75,
-        sigma_z: float = 0.25,
+        sigma_z: float = 0.3,
     ):
         """Particle filter class initializer.
 
@@ -66,27 +66,32 @@ class ParticleFilter:
 
         """
         # TODO: 2.10. Complete the missing function body with your code.
-        # Hyperparameters
-        DBSCAN_EPS = 0.20
-        DBSCAN_MIN_SAMPLES = 15
-        THETA_WEIGHT = 0.1  # peso de theta en DBSCAN (conservador)
 
-        MIN_PARTICLES = 100
+        # Versión más estable: clustering con theta, reducción segura y criterios anti-falsos positivos.
+
+        # Hyperparameters (tuneados para estabilidad)
+        DBSCAN_EPS = 0.3
+        DBSCAN_MIN_SAMPLES = 10
+        THETA_WEIGHT = 0.2  # peso de theta en DBSCAN (más informativo que 0.1)
+
+        MIN_PARTICLES = 200
         MAX_PARTICLES = self._initial_particle_count
 
-        TRACKING_PARTICLES = 20  # minimo de particulas en modo tracking
-        REDUCTION_FACTOR = 0.75  # cada llamada se conserva este % de particulas
-        PARTICLES_PER_CLUSTER = 100
+        TRACKING_PARTICLES = 100  # modo “GPS”
+        REDUCTION_FACTOR = 0.90  # reducción más lenta para no romper el cluster
+        PARTICLES_PER_CLUSTER = 200  # cuando hay varios clusters
+
+        # Anti-falsos positivos: exige que el cluster dominante tenga tamaño suficiente
+        MIN_CLUSTER_FRAC = 0.30  # 30% del total de partículas (ajusta si hace falta)
 
         localized: bool = False
         pose: tuple[float, float, float] = (float("inf"), float("inf"), float("inf"))
 
-        # Seguridad basica
+        # Seguridad básica
         if self._particles is None or len(self._particles) == 0:
             return False, pose
 
-        # DBSCAN sobre (x, y, cos(theta)*w, sin(theta)*w)
-        # Theta codificado como circular para evitar fusionar clusters opuestos
+        # --- DBSCAN sobre (x, y, cos(theta)*w, sin(theta)*w) ---
         particles_xy = np.array(self._particles[:, 0:2], dtype=float)
         particles_th = np.array(self._particles[:, 2], dtype=float)
         features = np.column_stack(
@@ -101,8 +106,14 @@ class ParticleFilter:
         cluster_ids = [c for c in set(labels.tolist()) if c != -1]
         num_clusters = len(cluster_ids)
 
+        # --- Decide si está localizado ---
         if num_clusters == 1:
-            localized = True
+            cid = cluster_ids[0]
+            cluster_size = int(np.sum(labels == cid))
+            if cluster_size >= int(MIN_CLUSTER_FRAC * len(self._particles)):
+                localized = True
+            else:
+                localized = False
         else:
             localized = False
 
@@ -110,38 +121,36 @@ class ParticleFilter:
             cid = cluster_ids[0]
             mask = labels == cid
             cluster_particles = self._particles[mask]
-            nc = cluster_particles.shape[0]
+            nc = int(cluster_particles.shape[0])
 
             if nc == 0:
                 return False, pose
 
-            # --- Reduccion gradual ponderada por distancia al centroide ---
-            # Solo reducimos si estamos por encima de TRACKING_PARTICLES
+            # --- Reducción gradual dentro del cluster (ponderada por distancia al centroide) ---
+            # Objetivo: terminar en TRACKING_PARTICLES sin “romper” el cluster
             if nc > TRACKING_PARTICLES:
-                # Centroide en (x, y)
                 cx = float(np.mean(cluster_particles[:, 0].astype(float)))
                 cy = float(np.mean(cluster_particles[:, 1].astype(float)))
 
-                # Distancia euclidea de cada particula al centroide
                 dists = np.sqrt(
                     (cluster_particles[:, 0].astype(float) - cx) ** 2
                     + (cluster_particles[:, 1].astype(float) - cy) ** 2
                 )
 
-                # Peso inversamente proporcional a la distancia (mas cerca = mas prob de sobrevivir)
-                # Sumamos epsilon para evitar division por cero
+                # Más cerca del centroide => más probabilidad de sobrevivir
                 weights = 1.0 / (dists + 1e-6)
                 weights /= weights.sum()
 
-                # Reduccion gradual: target es REDUCTION_FACTOR * n_actual, minimo TRACKING_PARTICLES
+                # Reducir lento, pero nunca por debajo de TRACKING_PARTICLES
                 target_count = max(TRACKING_PARTICLES, int(nc * REDUCTION_FACTOR))
+                target_count = min(target_count, nc)
+
                 idx = np.random.choice(nc, size=target_count, replace=False, p=weights)
                 self._particles = cluster_particles[idx].copy()
             else:
-                # Ya tenemos pocas particulas, conservar todas las del cluster
                 self._particles = cluster_particles.copy()
 
-            # Calcular pose desde las particulas supervivientes
+            # --- Estimar pose desde las partículas supervivientes ---
             pts = self._particles
             xs = pts[:, 0].astype(float)
             ys = pts[:, 1].astype(float)
@@ -150,7 +159,7 @@ class ParticleFilter:
             x_h = float(np.mean(xs))
             y_h = float(np.mean(ys))
 
-            # Media circular para theta
+            # Media circular para theta (maneja 0 ~ 2π)
             s = float(np.mean(np.sin(th)))
             c = float(np.mean(np.cos(th)))
             theta_h = float(math.atan2(s, c) % (2.0 * math.pi))
@@ -158,13 +167,13 @@ class ParticleFilter:
             pose = (x_h, y_h, theta_h)
 
         else:
-            # No localizado: ajustar numero de particulas segun clusters
+            # --- No localizado: ajustar número de partículas según número de clusters ---
             if num_clusters == 0:
                 target_count = MAX_PARTICLES
             else:
                 target_count = PARTICLES_PER_CLUSTER * max(1, num_clusters)
 
-            target_count = max(MIN_PARTICLES, min(MAX_PARTICLES, target_count))
+            target_count = max(MIN_PARTICLES, min(MAX_PARTICLES, int(target_count)))
             n = int(self._particles.shape[0])
 
             if target_count != n:
@@ -224,7 +233,7 @@ class ParticleFilter:
             self._particles[i, 1] = y1
             self._particles[i, 2] = th1
 
-    def resample(self, measurements: list[float]) -> None:  # cambiar a remuestreo sistemático para proteger mala suerte con numeros aleatorios https://www.tuananhle.co.uk/notes/resampling.html
+    def resample(self, measurements: list[float]) -> None:
         """Samples a new set of particles.
 
         Args:
@@ -249,19 +258,7 @@ class ParticleFilter:
         else:
             weights /= w_sum
 
-        # Remuestreo sistemático
-        positions = (np.arange(n) + np.random.uniform()) / n
-        cumulative_sum = np.cumsum(weights)
-
-        idx = np.zeros(n, dtype=int)
-        i, j = 0, 0
-
-        while i < n:
-            if positions[i] < cumulative_sum[j]:
-                idx[i] = j
-                i += 1
-            else:
-                j += 1
+        idx = np.random.choice(np.arange(n), size=n, replace=True, p=weights)
 
         self._particles = self._particles[idx].copy()
 
@@ -478,7 +475,7 @@ class ParticleFilter:
         z_missing = replacement_factor * self._sensor_range
 
         for z, z_pred in zip(measurements, z_hat):
-            # Reemplaza medidas "no disponibles"
+            # Reemplaza medidas "no disponibles" con 1.25 * sensor_range (real y simulada)
             z_use = z_missing if (z is None or math.isinf(z)) else float(z)
             z_pred_use = z_missing if (z_pred is None or math.isinf(z_pred)) else float(z_pred)
 
