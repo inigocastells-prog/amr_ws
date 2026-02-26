@@ -59,7 +59,7 @@ class PurePursuit:
         # Si el objetivo está "detrás" (x_r <= 0), forzamos giro en el sitio suave
         # (esto evita comportamientos raros cuando el target cae detrás por discretización)
         if x_r <= 1e-6:
-            v = 0.05
+            v = 0.0 # PONEMOS LA VELOCIDAD A 0 PARA QUE SOLO ROTE Y NO SE CHOQUE
             w = 0.6 if y_r > 0.0 else -0.6
             return v, w
 

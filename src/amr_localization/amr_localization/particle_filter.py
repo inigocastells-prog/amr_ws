@@ -21,7 +21,7 @@ class ParticleFilter:
         particle_count: int,
         sigma_v: float = 0.2,
         sigma_w: float = 0.75,
-        sigma_z: float = 0.3,
+        sigma_z: float = 0.6,
     ):
         """Particle filter class initializer.
 
@@ -78,7 +78,7 @@ class ParticleFilter:
         MAX_PARTICLES = self._initial_particle_count
 
         TRACKING_PARTICLES = 100  # modo “GPS”
-        REDUCTION_FACTOR = 0.90  # reducción más lenta para no romper el cluster
+        REDUCTION_FACTOR = 0.60  # reducción más lenta para no romper el cluster
         PARTICLES_PER_CLUSTER = 200  # cuando hay varios clusters
 
         # Anti-falsos positivos: exige que el cluster dominante tenga tamaño suficiente
@@ -102,8 +102,11 @@ class ParticleFilter:
             ]
         )
         labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES).fit_predict(features)
+        valid_mask = labels != -1
+        self._particles = self._particles[valid_mask].copy()
+        labels = labels[valid_mask]
 
-        cluster_ids = [c for c in set(labels.tolist()) if c != -1]
+        cluster_ids = [c for c in set(labels.tolist()) if c != -1] # quitar el ruido
         num_clusters = len(cluster_ids)
 
         # --- Decide si está localizado ---
@@ -145,7 +148,7 @@ class ParticleFilter:
                 target_count = max(TRACKING_PARTICLES, int(nc * REDUCTION_FACTOR))
                 target_count = min(target_count, nc)
 
-                idx = np.random.choice(nc, size=target_count, replace=False, p=weights)
+                idx = np.random.choice(nc, size=target_count, replace=False, p=weights) # cambiar el random choice para coger las particulas más probables
                 self._particles = cluster_particles[idx].copy()
             else:
                 self._particles = cluster_particles.copy()
@@ -183,6 +186,9 @@ class ParticleFilter:
                     replace=(target_count > n),
                 )
                 self._particles = self._particles[idx].copy()
+                
+
+                
 
         return localized, pose
 
@@ -261,6 +267,10 @@ class ParticleFilter:
         idx = np.random.choice(np.arange(n), size=n, replace=True, p=weights)
 
         self._particles = self._particles[idx].copy()
+        INJECT_FRAC = 0.03  # 3% (prueba 0.02–0.05)
+        k = int(INJECT_FRAC * n)
+        if k > 0:
+            self._particles[:k] = self._init_particles(k)
 
     def plot(self, axes, orientation: bool = True):
         """Draws particles.
@@ -468,7 +478,7 @@ class ParticleFilter:
 
         # TODO: 2.8. Complete the missing function body with your code.
 
-                # Predicción de medidas para esta partícula
+        # Predicción de medidas para esta partícula
         z_hat = self._sense(particle)
 
         # Reemplazo para lecturas fuera de rango (inf)
