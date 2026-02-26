@@ -468,20 +468,32 @@ class ParticleFilter:
 
         # TODO: 2.8. Complete the missing function body with your code.
 
+                # Predicción de medidas para esta partícula
         z_hat = self._sense(particle)
 
-        # Factor para reemplazar lecturas inf (cámbialo si quieres)
-        replacement_factor = 1.25
-        z_missing = replacement_factor * self._sensor_range
+        # Reemplazo para lecturas fuera de rango (inf)
+        z_missing = 1.25 * self._sensor_range
+
+        # Evitar underflow: en vez de multiplicar muchas gaussianas directamente,
+        # acumulamos en log y al final convertimos a probabilidad.
+        logp = 0.0
+        EPS = 1e-300  # para evitar log(0)
 
         for z, z_pred in zip(measurements, z_hat):
-            # Reemplaza medidas "no disponibles" con 1.25 * sensor_range (real y simulada)
             z_use = z_missing if (z is None or math.isinf(z)) else float(z)
             z_pred_use = z_missing if (z_pred is None or math.isinf(z_pred)) else float(z_pred)
 
-            # Modelo de sensor: gaussiana centrada en la predicción
-            # (asumo que tu sigma del sensor está en self._sigma_z; usa el nombre que tengas)
-            probability *= self._gaussian(mu=z_pred_use, sigma=self._sigma_z, x=z_use)
+            p = self._gaussian(mu=z_pred_use, sigma=self._sigma_z, x=z_use)
+            if p < EPS:
+                p = EPS
+            logp += math.log(p)
+
+        # Convertir de vuelta a probabilidad.
+        # Si logp es demasiado negativo, exp(logp) underflow -> 0.0 (correcto).
+        if logp < -700.0:
+            probability = 0.0
+        else:
+            probability = float(math.exp(logp))
 
         return probability
 

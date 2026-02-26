@@ -6,9 +6,9 @@ import math
 
 def generate_launch_description():
     world = "project"
-    start = (-4.0, -1.0, 1.5 * math.pi)
+    start = (-2.0, -1.0, 1.5 * math.pi)
     goal = (2.0, -3.0)
-    particles = 4000
+    particles = 8000
 
     wall_follower_node = LifecycleNode(
         package="amr_control",
@@ -27,7 +27,7 @@ def generate_launch_description():
         namespace="",
         output="screen",
         arguments=["--ros-args", "--log-level", "WARN"],
-        parameters=[{"enable_plot": False, "particles": particles, "world": world}],
+        parameters=[{"enable_plot": True, "particles": particles, "world": world}],
     )
 
     a_star_node = LifecycleNode(
