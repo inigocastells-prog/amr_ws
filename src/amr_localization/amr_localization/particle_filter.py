@@ -77,7 +77,7 @@ class ParticleFilter:
         MIN_PARTICLES = 200
         MAX_PARTICLES = self._initial_particle_count
 
-        TRACKING_PARTICLES = 100  # modo “GPS”
+        TRACKING_PARTICLES = 80  # modo “GPS”
         REDUCTION_FACTOR = 0.60  # reducción más lenta para no romper el cluster
         PARTICLES_PER_CLUSTER = 200  # cuando hay varios clusters
 

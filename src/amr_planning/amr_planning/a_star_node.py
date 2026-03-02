@@ -85,7 +85,7 @@ class AStarNode(LifecycleNode):
             # Execute A*
             start = (pose_msg.pose.position.x, pose_msg.pose.position.y)
             path, steps = self._planning.a_star(start, self._goal)
-            smoothed_path = AStar.smooth_path(path, data_weight=0.2, smooth_weight=0.2)
+            smoothed_path = AStar.smooth_path(path, data_weight=0.3, smooth_weight=0.15)
 
             # --- Run naive search (heuristic = 0) ---
             original_compute_heuristic = self._planning._compute_heuristic

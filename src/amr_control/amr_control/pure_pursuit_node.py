@@ -19,7 +19,9 @@ class PurePursuitNode(LifecycleNode):
 
         # Parameters
         self.declare_parameter("dt", 0.05)
-        self.declare_parameter("lookahead_distance", 0.5)
+        self.declare_parameter("lookahead_distance", 0.8)
+        self.declare_parameter("align_on_localization_tolerance", 0.06)
+        self.declare_parameter("align_on_localization_turn_rate", 0.6)
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         """Handles a configuring transition.
@@ -36,6 +38,16 @@ class PurePursuitNode(LifecycleNode):
             lookahead_distance = (
                 self.get_parameter("lookahead_distance").get_parameter_value().double_value
             )
+            self._align_tol = (
+                self.get_parameter("align_on_localization_tolerance")
+                .get_parameter_value()
+                .double_value
+            )
+            self._align_turn_rate = (
+                self.get_parameter("align_on_localization_turn_rate")
+                .get_parameter_value()
+                .double_value
+            )
 
             # Subscribers
             self._subscriber_pose = self.create_subscription(
@@ -48,6 +60,8 @@ class PurePursuitNode(LifecycleNode):
 
             # Attribute and object initializations
             self._pure_pursuit = PurePursuit(dt, lookahead_distance)
+            self._was_localized = False
+            self._align_on_localization_active = False
 
         except Exception:
             self.get_logger().error(f"{traceback.format_exc()}")
@@ -75,6 +89,9 @@ class PurePursuitNode(LifecycleNode):
             pose_msg: Message containing the estimated robot pose.
 
         """
+        if pose_msg.localized and not self._was_localized:
+            self._align_on_localization_active = True
+
         if pose_msg.localized:
             # Parse pose
             x = pose_msg.pose.position.x
@@ -86,12 +103,30 @@ class PurePursuitNode(LifecycleNode):
             _, _, theta = quat2euler((quat_w, quat_x, quat_y, quat_z))
             theta %= 2 * math.pi
 
-            # Execute pure pursuit
-            v, w = self._pure_pursuit.compute_commands(x, y, theta)
+            # One-shot alignment only when transitioning into localized mode.
+            if self._align_on_localization_active and self._pure_pursuit.path:
+                _, closest_idx = self._pure_pursuit._find_closest_point(x, y)
+                target_x, target_y = self._pure_pursuit._find_target_point((x, y), closest_idx)
+                target_heading = math.atan2(target_y - y, target_x - x)
+                heading_error = math.atan2(
+                    math.sin(target_heading - theta), math.cos(target_heading - theta)
+                )
+
+                if abs(heading_error) > self._align_tol:
+                    v = 0.0
+                    w = self._align_turn_rate if heading_error > 0.0 else -self._align_turn_rate
+                else:
+                    self._align_on_localization_active = False
+                    v, w = self._pure_pursuit.compute_commands(x, y, theta)
+            else:
+                # Execute pure pursuit
+                v, w = self._pure_pursuit.compute_commands(x, y, theta)
             self.get_logger().info(f"Commands: v = {v:.3f} m/s, w = {w:+.3f} rad/s")
 
             # Publish
             self._publish_velocity_commands(v, w)
+
+        self._was_localized = pose_msg.localized
 
     def _path_callback(self, path_msg: Path):
         """Subscriber callback. Saves the path the pure pursuit controller has to follow.
@@ -109,7 +144,7 @@ class PurePursuitNode(LifecycleNode):
             path.append((x, y))
 
         self._pure_pursuit.path = path
-        
+
     def _publish_velocity_commands(self, v: float, w: float) -> None:
         """Publishes velocity commands in a geometry_msgs.msg.TwistStamped message.
 
@@ -118,6 +153,12 @@ class PurePursuitNode(LifecycleNode):
             w: Angular velocity command [rad/s].
 
         """
+        v = float(v)
+        w = float(w)
+        if not math.isfinite(v) or not math.isfinite(w):
+            self.get_logger().warn("Invalid velocity command (non-finite). Command ignored.")
+            return
+
         msg = TwistStamped()
         # msg.header.stamp = self.get_clock().now().to_msg()
         msg.twist.linear.x = v

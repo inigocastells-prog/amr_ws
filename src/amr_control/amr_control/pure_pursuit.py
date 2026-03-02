@@ -56,10 +56,9 @@ class PurePursuit:
         x_r = cos_th * dx + sin_th * dy
         y_r = -sin_th * dx + cos_th * dy
 
-        # Si el objetivo está "detrás" (x_r <= 0), forzamos giro en el sitio suave
-        # (esto evita comportamientos raros cuando el target cae detrás por discretización)
+        # Si el objetivo cae detrás, gira en sitio para recolocarse.
         if x_r <= 1e-6:
-            v = 0.0 # PONEMOS LA VELOCIDAD A 0 PARA QUE SOLO ROTE Y NO SE CHOQUE
+            v = 0.0
             w = 0.6 if y_r > 0.0 else -0.6
             return v, w
 
@@ -72,7 +71,7 @@ class PurePursuit:
 
         # 6) Elegimos una v (constante) y calculamos w = v * kappa
         # (Luego se satura para evitar valores absurdos)
-        v = 0.7  # m/s
+        v = 0.8  # m/s
         w = v * kappa
 
         # Saturaciones razonables
@@ -84,7 +83,7 @@ class PurePursuit:
 
         # Opcional: bajar v en curvas fuertes
         if abs(w) > 0.8:
-            v = 0.3
+            v = 0.4
 
         return v, w
 

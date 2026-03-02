@@ -29,7 +29,7 @@ class WallFollower:
    
 
         # --- Parámetros ---
-        V_NOM = 0.45
+        V_NOM = 0.55
         V_MIN = 0.05
         W_MAX = 0.8
         W_FOLLOW_MAX = 0.30
